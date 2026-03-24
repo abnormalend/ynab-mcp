@@ -1,3 +1,4 @@
+import json
 from typing import List, Optional
 from enum import Enum
 
@@ -43,7 +44,7 @@ class ManageBudgetedAmountAction(str, Enum):
 
 class ManageBudgetedAmountInput(BudgetIdInput):
     action: ManageBudgetedAmountAction = Field(..., description="The action to perform.")
-    amount: float = Field(..., description="The amount in milliunits.")
+    amount: float = Field(..., description="The amount in milliunits (1/1000 of a currency unit). Multiply the dollar amount by 1000 — e.g. $10.50 = 10500, -$23.99 = -23990.")
     month: str = Field(..., description="The month to apply the action to (YYYY-MM-DD).")
     from_category_id: Optional[str] = Field(None, description="The ID of the category to move money from. Required for 'move' action.")
     to_category_id: Optional[str] = Field(None, description="The ID of the category to move money to, or the category to assign to.")
@@ -106,15 +107,22 @@ class ListMonthlyTransactionsInput(BudgetIdInput):
     month: str = Field(
         ..., description="The month to get transactions for (YYYY-MM-DD)"
     )
-    limit: Optional[float] = Field(
+    limit: Optional[int] = Field(
         None, description="The maximum number of transactions to return"
     )
+
+    @field_validator('limit', mode='before')
+    @classmethod
+    def coerce_limit(cls, v):
+        if isinstance(v, str):
+            return int(v)
+        return v
 
 
 class CreateTransactionInput(BudgetIdInput):
     account_id: str = Field(..., description="The ID of the account for the transaction.")
     date: str = Field(..., description="The transaction date in YYYY-MM-DD format.")
-    amount: float = Field(..., description="The transaction amount in milliunits.")
+    amount: float = Field(..., description="The transaction amount in milliunits (1/1000 of a currency unit). Multiply the dollar amount by 1000 — e.g. $10.50 = 10500, -$23.99 = -23990.")
     payee_id: Optional[str] = Field(None, description="The ID of the payee.")
     payee_name: Optional[str] = Field(
         None, description="The name of the payee. If not provided, a new payee will be created."
@@ -144,7 +152,7 @@ class CreateTransactionInput(BudgetIdInput):
 class NewTransactionModel(BaseModel):
     account_id: str = Field(..., description="The ID of the account for the transaction.")
     date: str = Field(..., description="The transaction date in YYYY-MM-DD format.")
-    amount: float = Field(..., description="The transaction amount in milliunits.")
+    amount: float = Field(..., description="The transaction amount in milliunits (1/1000 of a currency unit). Multiply the dollar amount by 1000 — e.g. $10.50 = 10500, -$23.99 = -23990.")
     payee_id: Optional[str] = Field(None, description="The ID of the payee.")
     payee_name: Optional[str] = Field(
         None, description="The name of the payee. If not provided, a new payee will be created."
@@ -169,11 +177,12 @@ class TransactionUpdate(BaseModel):
     id: str = Field(..., description="The ID of the transaction to update.")
     account_id: Optional[str] = Field(None, description="The ID of the account.")
     date: Optional[str] = Field(None, description="The transaction date in YYYY-MM-DD format.")
-    amount: Optional[float] = Field(None, description="The transaction amount in milliunits.")
+    amount: Optional[float] = Field(None, description="The transaction amount in milliunits (1/1000 of a currency unit). Multiply the dollar amount by 1000 — e.g. $10.50 = 10500, -$23.99 = -23990.")
     category_id: Optional[str] = Field(
         None, description="The ID of the category for the transaction."
     )
     payee_id: Optional[str] = Field(None, description="The ID of the payee.")
+    payee_name: Optional[str] = Field(None, description="The name of the payee. Use instead of payee_id when you only have the name.")
     memo: Optional[str] = Field(None, description="A memo for the transaction.")
     cleared: Optional[str] = Field(
         None, description="The cleared status of the transaction.",
@@ -195,6 +204,13 @@ class BulkManageTransactionsInput(BudgetIdInput):
     create_transactions: Optional[List[NewTransactionModel]] = Field(None, description="A list of transactions to create. Required for 'create' action.")
     update_transactions: Optional[List[TransactionUpdate]] = Field(None, description="A list of transactions to update. Required for 'update' action.")
     delete_transaction_ids: Optional[List[str]] = Field(None, description="A list of transaction IDs to delete. Required for 'delete' action.")
+
+    @field_validator('create_transactions', 'update_transactions', 'delete_transaction_ids', mode='before')
+    @classmethod
+    def parse_json_string(cls, v):
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
 
     @model_validator(mode='before')
     @classmethod
@@ -236,9 +252,16 @@ class ListTransactionsInput(BudgetIdInput):
     since_date: Optional[str] = Field(
         None, description="The starting date for transactions (YYYY-MM-DD). Only valid if 'account_id' is provided."
     )
-    limit: Optional[float] = Field(
+    limit: Optional[int] = Field(
         None, description="The maximum number of transactions to return."
     )
+
+    @field_validator('limit', mode='before')
+    @classmethod
+    def coerce_limit(cls, v):
+        if isinstance(v, str):
+            return int(v)
+        return v
 
     @model_validator(mode='before')
     @classmethod
@@ -253,7 +276,7 @@ class ListTransactionsInput(BudgetIdInput):
 class ScheduledTransaction(BaseModel):
     account_id: str = Field(..., description="The ID of the account for the transaction.")
     date: str = Field(..., description="The transaction date in YYYY-MM-DD format.")
-    amount: float = Field(..., description="The transaction amount in milliunits.")
+    amount: float = Field(..., description="The transaction amount in milliunits (1/1000 of a currency unit). Multiply the dollar amount by 1000 — e.g. $10.50 = 10500, -$23.99 = -23990.")
     frequency: str = Field(..., description="The frequency of the scheduled transaction (e.g. 'daily', 'weekly', 'monthly').")
     payee_id: Optional[str] = Field(None, description="The ID of the payee.")
     payee_name: Optional[str] = Field(

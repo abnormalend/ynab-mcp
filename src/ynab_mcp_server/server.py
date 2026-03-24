@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import json
 from datetime import datetime
 
@@ -27,6 +28,27 @@ from .settings import settings
 
 server = Server("ynab-mcp")
 
+
+def _allow_string_for_fields(schema: dict, fields: list[str]) -> dict:
+    """Post-process a JSON schema to also accept string values for specific fields.
+
+    Some MCP clients pass array/integer parameters as JSON-encoded strings.
+    This makes the schema permissive enough to accept both, while the handler
+    parses any strings before validation.
+    """
+    schema = copy.deepcopy(schema)
+    props = schema.get("properties", {})
+    for field in fields:
+        if field not in props:
+            continue
+        field_schema = props[field]
+        if "anyOf" in field_schema:
+            if not any(s.get("type") == "string" for s in field_schema["anyOf"]):
+                field_schema["anyOf"].append({"type": "string"})
+        else:
+            props[field] = {"anyOf": [field_schema, {"type": "string"}]}
+    return schema
+
 READ_ONLY_TOOLS = {
     "list-budgets",
     "list-accounts",
@@ -34,7 +56,7 @@ READ_ONLY_TOOLS = {
     "list-categories",
     "list-payees",
     "list-scheduled-transactions",
-    "get-financial-overview",
+    "manage-financial-overview",
     "get-month-info",
     "lookup-payee-locations",
 }
@@ -59,7 +81,9 @@ async def handle_list_tools() -> list[types.Tool]:
         types.Tool(
             name="list-transactions",
             description="List transactions for a specific account or an entire month. Use this to investigate spending patterns identified in the financial overview.",
-            inputSchema=ListTransactionsInput.model_json_schema(),
+            inputSchema=_allow_string_for_fields(
+                ListTransactionsInput.model_json_schema(), ["limit"]
+            ),
         ),
         types.Tool(
             name="list-categories",
@@ -87,7 +111,10 @@ async def handle_list_tools() -> list[types.Tool]:
         types.Tool(
             name="bulk-manage-transactions",
             description="Create, update, or delete multiple transactions at once. More efficient than making single changes.",
-            inputSchema=BulkManageTransactionsInput.model_json_schema(),
+            inputSchema=_allow_string_for_fields(
+                BulkManageTransactionsInput.model_json_schema(),
+                ["create_transactions", "update_transactions", "delete_transaction_ids"],
+            ),
         ),
         types.Tool(
             name="list-scheduled-transactions",
@@ -196,6 +223,8 @@ async def handle_call_tool(
             )
         ]
     elif name == "list-transactions":
+        if arguments and isinstance(arguments.get("limit"), str):
+            arguments["limit"] = int(arguments["limit"])
         args = ListTransactionsInput.model_validate(arguments or {})
         budget_id = await _get_budget_id(args.model_dump())
         
@@ -216,12 +245,14 @@ async def handle_call_tool(
                     budget_id=budget_id,
                     account_id=args.account_id,
                     since_date=since_date,
+                    limit=limit,
                 )
                 header = f"Here are the transactions for account {args.account_id} in {args.month}:"
             else:
                 transactions = await ynab_client.get_monthly_transactions(
                     budget_id=budget_id,
                     month=since_date,
+                    limit=limit,
                 )
                 header = f"Here are the transactions for {args.month}:"
 
@@ -230,24 +261,15 @@ async def handle_call_tool(
                 transactions = [
                     t for t in transactions if str(t.var_date).startswith(since_date[:7])
                 ]
-                if limit:
-                    transactions = transactions[:limit]
-        else:
-            # This case should now be primarily for account_id with since_date
-            transactions = await ynab_client.get_transactions(
-                budget_id=budget_id,
-                account_id=args.account_id,
-                since_date=args.since_date,
-                limit=limit,
-            )
-            header = f"Here are the latest transactions for account {args.account_id}:"
 
         if not transactions:
             return [types.TextContent(type="text", text="No transactions found.")]
 
         transaction_list = "\n".join(
             f"- {t.var_date}: {t.payee_name or 'N/A'} | "
-            f"{t.category_name or 'N/A'} | {t.amount / 1000:.2f} (ID: {t.id})"
+            f"{t.category_name or 'N/A'} | {t.amount / 1000:.2f}"
+            + (f" | Memo: {t.memo}" if t.memo else "")
+            + f" (ID: {t.id})"
             for t in transactions
         )
         return [
@@ -354,6 +376,10 @@ async def handle_call_tool(
                 )
             ]
     elif name == "bulk-manage-transactions":
+        if arguments:
+            for field in ("create_transactions", "update_transactions", "delete_transaction_ids"):
+                if isinstance(arguments.get(field), str):
+                    arguments[field] = json.loads(arguments[field])
         args = BulkManageTransactionsInput.model_validate(arguments or {})
         budget_id = await _get_budget_id(args.model_dump())
 
@@ -419,8 +445,9 @@ async def handle_call_tool(
 
         scheduled_list = "\n".join(
             f"- {t.var_date}: {t.payee_name or 'N/A'} | "
-            f"{t.category_name or 'N/A'} | {t.amount / 1000:.2f} "
-            f"(Frequency: {t.frequency})"
+            f"{t.category_name or 'N/A'} | {t.amount / 1000:.2f}"
+            + (f" | Memo: {t.memo}" if t.memo else "")
+            + f" (Frequency: {t.frequency})"
             for t in transactions
         )
         return [

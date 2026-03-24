@@ -9,7 +9,7 @@ from typing import Optional
 import ynab
 from ynab.api import (
     accounts_api,
-    budgets_api,
+    plans_api,
     categories_api,
     months_api,
     payees_api,
@@ -149,7 +149,7 @@ class YNABClient:
     def __init__(self, token: str):
         configuration = ynab.Configuration(access_token=token)
         self.api_client = ynab.ApiClient(configuration)
-        self._budgets_api = budgets_api.BudgetsApi(self.api_client)
+        self._plans_api = plans_api.PlansApi(self.api_client)
         self._accounts_api = accounts_api.AccountsApi(self.api_client)
         self._categories_api = categories_api.CategoriesApi(self.api_client)
         self._transactions_api = transactions_api.TransactionsApi(self.api_client)
@@ -172,9 +172,9 @@ class YNABClient:
         response = await self._run_sync(self._user_api.get_user)
         return response.data.user
 
-    async def get_budgets(self) -> list[ynab.BudgetSummary]:
-        response = await self._run_sync(self._budgets_api.get_budgets)
-        return response.data.budgets
+    async def get_budgets(self) -> list[ynab.PlanSummary]:
+        response = await self._run_sync(self._plans_api.get_plans)
+        return response.data.plans
 
     async def get_account_by_id(self, budget_id: str, account_id: str) -> ynab.Account:
         response = await self._run_sync(
@@ -389,7 +389,7 @@ class YNABClient:
         )
         return response.data.payee_locations
 
-    async def get_default_budget(self) -> ynab.BudgetSummary:
+    async def get_default_budget(self) -> ynab.PlanSummary:
         """Gets the first available budget, assuming only one is used."""
         budgets = await self.get_budgets()
         return budgets[0]
